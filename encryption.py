@@ -1,6 +1,9 @@
 # Encryption library for relevant operations on bytes objects
 
+import base64
 from cryptography.hazmat.primitives import hashes
+from cryptography.fernet import Fernet, InvalidToken
+from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
 
 def caesar_encrypt(data: bytes, key: int) -> bytes:
@@ -49,3 +52,50 @@ def hash_md5(data: bytes) -> str:
     digest = hashes.Hash(hashes.MD5())
     digest.update(data)
     return digest.finalize().hex()
+
+
+def fernet_passwd_encrypt(data: bytes, passwd: bytes) -> bytes:
+    """
+    Encrypts bytes using Fernet symmetrical encryption, with a key derived from a password.
+
+    :param data: The bytes to be encrypted.
+    :param passwd: The bytes password to use for encryption.
+    :return: The encrypted bytes of data.
+    """
+    # Key Derivation Function, to turn the password into a Fernet usable key
+    kdf = Scrypt(
+        salt=b'salt',  # NOT randomly generated salt. It could be, only if we had a way to store the salt in the file.
+        length=32,
+        n=2**14,
+        r=8,
+        p=1,
+    )
+    key = base64.urlsafe_b64encode(kdf.derive(passwd))
+    # Fernet symmetrical encryption
+    f = Fernet(key)
+    encrypted_data = f.encrypt(data)
+    return encrypted_data
+
+
+def fernet_passwd_decrypt(encrypted_data: bytes, passwd: bytes) -> bytes:
+    """
+    Decrypts bytes using Fernet symmetrical encryption, with a key derived from a password.
+
+    :param encrypted_data: The bytes to be decrypted.
+    :param passwd: The bytes password to use for decryption.
+    :return: The decrypted bytes of data.
+    :raises cryptography.fernet.InvalidToken: If the provided password is not correct.
+    """
+    # Key Derivation Function, to turn the password into a Fernet usable key
+    kdf = Scrypt(
+        salt=b'salt',  # NOT randomly generated salt. It could be, only if we had a way to store the salt in the file.
+        length=32,
+        n=2**14,
+        r=8,
+        p=1,
+    )
+    key = base64.urlsafe_b64encode(kdf.derive(passwd))
+    # Fernet symmetrical decryption
+    f = Fernet(key)
+    data = f.decrypt(encrypted_data)
+    return data
