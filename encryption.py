@@ -4,6 +4,7 @@ import base64
 from cryptography.hazmat.primitives import hashes
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+from cryptography.hazmat.primitives import serialization
 
 
 def caesar_encrypt(data: bytes, key: int) -> bytes:
@@ -103,3 +104,31 @@ def fernet_passwd_decrypt(encrypted_data: bytes, passwd: bytes) -> bytes:
     f = Fernet(key)
     data = f.decrypt(encrypted_data)
     return data
+
+
+def load_ssh_private_key(key_path: str, password: b''):
+    """
+    Reads a private key from an OpenSSH-formatted (by default RSA) private key file.
+
+    :param key_path: The path to the private key file.
+    :param password: The passphrase to the key file, if needed.
+    :return: The private key as a private key object of relevant type.
+    """
+    with open(key_path, 'rb') as key_file:
+        private_key = serialization.load_ssh_private_key(
+            key_file.read(),
+            password=None if not password else password
+        )
+    return private_key
+
+
+def load_ssh_public_key(key_path: str):
+    """
+    Reads a public key from an OpenSSH-formatted (by default RSA) public key file.
+
+    :param key_path: The path to the public key file.
+    :return: The public key as a public key object of relevant type.
+    """
+    with open(key_path, 'rb') as key_file:
+        public_key = serialization.load_ssh_public_key(key_file.read())
+    return public_key
