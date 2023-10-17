@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 def caesar_encrypt(data: bytes, key: int) -> bytes:
     """
     Encrypts bytes using a Caesar shift.
+
     :param data: The bytes to be encrypted.
     :param key: The numerical encryption key.
     :return: The encrypted bytes of data.
@@ -22,6 +23,7 @@ def caesar_encrypt(data: bytes, key: int) -> bytes:
 def caesar_decrypt(encrypted_data: bytes, key: int) -> bytes:
     """
     Decrypts bytes using a Caesar shift.
+
     :param encrypted_data: The bytes to be decrypted.
     :param key: The numerical decryption key.
     :return: The decrypted bytes of data.
@@ -35,6 +37,7 @@ def caesar_decrypt(encrypted_data: bytes, key: int) -> bytes:
 def hash_sha256(data: bytes) -> str:
     """
     Calculate the SHA256 hash of bytes.
+
     :param data: The bytes to hash.
     :return: The SHA256 hash of the data.
     """
@@ -46,6 +49,7 @@ def hash_sha256(data: bytes) -> str:
 def hash_md5(data: bytes) -> str:
     """
     Calculate the MD5 hash of bytes.
+
     :param data: The bytes to hash.
     :return: The MD5 hash of the data.
     """
