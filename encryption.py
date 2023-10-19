@@ -1,10 +1,19 @@
 # Encryption library for relevant operations on bytes objects
 
 import base64
+import os
 from cryptography.hazmat.primitives import hashes
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.asymmetric import padding
+
+
+def setup():
+    if not os.path.isdir(os.path.join(os.path.curdir, 'keys')):
+        os.mkdir(os.path.join(os.path.curdir, 'keys'))
 
 
 def caesar_encrypt(data: bytes, key: int) -> bytes:
@@ -132,3 +141,82 @@ def load_ssh_public_key(key_path: str):
     with open(key_path, 'rb') as key_file:
         public_key = serialization.load_ssh_public_key(key_file.read())
     return public_key
+
+
+def generate_rsa_keys(key_name: str, path=os.path.join(os.path.curdir, 'keys')):
+    """
+    Generate a new RSA key pair, saved as files.
+
+    :param key_name: The filename to write to. The public key will be saved as the filename with a .pub extension.
+    :param path: The directory to save in. Defaults to 'keys' under the main application directory.
+    :return: A tuple of the generated (RSAPrivateKey, RSAPublicKey).
+    """
+    # Check to see if the path is valid and exists
+    if not os.path.isdir(path):
+        raise NotADirectoryError
+    # Generate the RSA key pair. 65537 is the standard public exponent and 3072 is the default key size of ssh-keygen.
+    key = rsa.generate_private_key(
+        backend=default_backend(),
+        public_exponent=65537,
+        key_size=3072,
+    )
+    # Convert to bytes of standard file format
+    private_key = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.OpenSSH,
+        serialization.NoEncryption()
+    )
+    public_key = key.public_key().public_bytes(
+        serialization.Encoding.OpenSSH,
+        serialization.PublicFormat.OpenSSH
+    )
+    # Write files
+    with open(os.path.join(path, key_name), 'wb') as private_file:
+        private_file.write(private_key)
+    with open(os.path.join(path, key_name)+'.pub', 'wb') as public_file:
+        public_file.write(public_key)
+    return key.private_numbers().private_key(), key.public_key()
+
+
+def rsa_encrypt(data: bytes, public_key: rsa.RSAPublicKey) -> bytes:
+    """
+    Encrypts bytes using RSA asymmetrical encryption with a public key.
+
+    :param data: The bytes to be encrypted.
+    :param public_key: An RSAPublicKey object obtained with generate_rsa_keys() or load_ssh_public_key().
+    :return: The encrypted bytes of data.
+    :raises ValueError: If the given private key is not correct.
+    """
+    # Secure encryption with padding and hashing
+    encrypted_data = public_key.encrypt(
+        data,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    return encrypted_data
+
+
+def rsa_decrypt(encrypted_data: bytes, private_key: rsa.RSAPrivateKey) -> bytes:
+    """
+    Decrypts bytes using RSA asymmetrical encryption with a private key.
+
+    :param encrypted_data: The bytes to be decrypted.
+    :param private_key: An RSAPrivateKey object obtained with generate_rsa_keys() or load_ssh_private_key().
+    :return: The decrypted bytes of data.
+    """
+    # Identical padding and hashing settings to rsa_encrypt()
+    recovered_data = private_key.decrypt(
+        encrypted_data,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    return recovered_data
+
+
+setup()
