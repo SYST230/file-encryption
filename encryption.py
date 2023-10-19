@@ -106,7 +106,7 @@ def fernet_passwd_decrypt(encrypted_data: bytes, passwd: bytes) -> bytes:
     return data
 
 
-def load_ssh_private_key(key_path: str, password: b''):
+def load_ssh_private_key(key_path: str, password=b''):
     """
     Reads a private key from an OpenSSH-formatted (by default RSA) private key file.
 
