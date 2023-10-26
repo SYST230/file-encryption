@@ -2,6 +2,7 @@
 
 import base64
 import os
+
 from cryptography.hazmat.primitives import hashes
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
@@ -9,6 +10,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 
 def setup():
@@ -217,6 +220,138 @@ def rsa_decrypt(encrypted_data: bytes, private_key: rsa.RSAPrivateKey) -> bytes:
         )
     )
     return recovered_data
+
+
+def hmac(passwd: bytes, message: bytes) -> bytes:
+    """
+    Calculate the HMAC of a message and a key.
+
+    Uses SHA256 and produces a 32-byte HMAC.
+    :param passwd: The key.
+    :param message: The message.
+    :return: The HMAC. Use hmac().hex() for user-readable format.
+    """
+    BLOCK_SIZE = 64
+    if len(passwd) > BLOCK_SIZE:
+        digest = hashes.Hash(hashes.SHA256())
+        digest.update(passwd)
+        passwd_prime = digest.finalize()
+    else:
+        passwd_prime = passwd
+    while len(passwd_prime) < BLOCK_SIZE:
+        passwd_prime += b'\x00'
+    opad = b'\x5c' * BLOCK_SIZE
+    ipad = b'\x36' * BLOCK_SIZE
+    part1 = b''
+    part2 = b''
+    for i in range(BLOCK_SIZE):
+        part1 += (passwd_prime[i] ^ opad[i]).to_bytes(1, 'little')
+        part2 += (passwd_prime[i] ^ ipad[i]).to_bytes(1, 'little')
+    part2 += message
+    digest = hashes.Hash(hashes.SHA256())
+    digest.update(part2)
+    part2 = digest.finalize()
+    digest = hashes.Hash(hashes.SHA256())
+    digest.update(part1 + part2)
+    return digest.finalize()
+
+
+def aes_encrypt(data: bytes, passwd: bytes):
+    """
+    Encrypt bytes using AES symmetrical encryption with a password.
+
+    :param data: The bytes to encrypt.
+    :param passwd: The bytes password to use for encryption.
+    :return: A tuple of the encrypted bytes of data and the random IV used.
+    """
+    iv = os.urandom(16)
+    kdf = Scrypt(
+        salt=iv,
+        length=32,
+        n=2**14,
+        r=8,
+        p=1,
+    )
+    key = kdf.derive(passwd)
+    encryptor = Cipher(algorithms.AES(key), modes.XTS(iv)).encryptor()
+    if len(data) < 16:
+        padder = padding.PKCS7(128).padder()
+        data = padder.update(data) + padder.finalize()
+    encrypted_data = encryptor.update(data) + encryptor.finalize()
+    return encrypted_data, iv
+
+
+def aes_decrypt(encrypted_data: bytes, passwd: bytes, iv: bytes):
+    """
+    Decrypt bytes using AES symmetrical encryption with a password.
+
+    :param encrypted_data: The bytes to be decrypted.
+    :param passwd: The bytes password to use for decryption.
+    :param iv: The IV used, generated during encryption.
+    :return: The decrypted bytes of data.
+    """
+    kdf = Scrypt(
+        salt=iv,
+        length=32,
+        n=2**14,
+        r=8,
+        p=1,
+    )
+    key = kdf.derive(passwd)
+    decryptor = Cipher(algorithms.AES(key), modes.XTS(iv)).decryptor()
+    recovered_padded_data = decryptor.update(encrypted_data) + decryptor.finalize()
+    try:
+        unpadder = padding.PKCS7(128).unpadder()
+        recovered_data = unpadder.update(recovered_padded_data) + unpadder.finalize()
+    except ValueError as e:
+        if str(e) == 'Invalid padding bytes.':
+            recovered_data = recovered_padded_data
+        else:
+            raise e
+    return recovered_data
+
+
+def format_aes(passwd: bytes, encrypted_data: bytes, iv: bytes, file_size: int) -> bytes:
+    """
+    Given the key, encrypted message, and initialization vector of an AES encryption, assemble an AESCrypt format file.
+    Uses AESCrypt Format Version 0.
+
+    :param passwd: The password used to encrypt the data.
+    :param encrypted_data: The encrypted data.
+    :param iv: The Initialization Vector of the AES algorithm.
+    :param file_size: The size of the unencrypted file in bytes.
+    :return: The formatted file data.
+    """
+    # AES File Format version 0, as defined by AES Crypt
+    # https://www.aescrypt.com/aes_file_format.html
+    data = b'AES\x00'
+    data += (file_size % 16).to_bytes(1, 'little')
+    data += iv
+    data += encrypted_data
+    data += hmac(passwd, encrypted_data)
+    return data
+
+
+def unformat_aes(passwd: bytes, filedata: bytes):
+    """
+    Parse an AES Crypt (version 0) file, extracting usable values from its contents.
+    Also uses the HMAC of the file to verify the given password is correct.
+
+    :param passwd: The password used to encrypt the data.
+    :param filedata: The formatted file data.
+    :return: A 3-tuple of the encrypted file data, the IV, and the unencrypted file size in bytes mod 16.
+    """
+    if not filedata.startswith(b'AES\x00'):
+        raise ValueError('Invalid file format.')
+    idx = 4
+    file_size_mod_16 = filedata[idx]
+    idx += 1
+    iv = filedata[idx:idx+16]
+    idx += 16
+    encrypted_data = filedata[idx:-32]
+    if hmac(passwd, encrypted_data) != filedata[-32:]:
+        raise ValueError('Invalid password.')
+    return encrypted_data, iv, file_size_mod_16
 
 
 setup()
