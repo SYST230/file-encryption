@@ -4,12 +4,12 @@ import base64
 import os
 
 from cryptography.hazmat.primitives import hashes
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
@@ -101,7 +101,7 @@ def fernet_passwd_decrypt(encrypted_data: bytes, passwd: bytes) -> bytes:
     :param encrypted_data: The bytes to be decrypted.
     :param passwd: The bytes password to use for decryption.
     :return: The decrypted bytes of data.
-    :raises cryptography.fernet.InvalidToken: If the provided password is not correct.
+    :raises ValueError: If the provided password is not correct or the file was not encrypted with Fernet.
     """
     # Key Derivation Function, to turn the password into a Fernet usable key
     kdf = Scrypt(
@@ -114,7 +114,10 @@ def fernet_passwd_decrypt(encrypted_data: bytes, passwd: bytes) -> bytes:
     key = base64.urlsafe_b64encode(kdf.derive(passwd))
     # Fernet symmetrical decryption
     f = Fernet(key)
-    data = f.decrypt(encrypted_data)
+    try:
+        data = f.decrypt(encrypted_data)
+    except InvalidToken:
+        raise ValueError('Something went wrong. Double check that the file and password are correct.')
     return data
 
 
@@ -146,7 +149,7 @@ def load_ssh_public_key(key_path: str):
     return public_key
 
 
-def generate_rsa_keys(key_name: str, path=os.path.join(os.path.curdir, 'keys')):
+def generate_rsa_keys(key_name: str, path=''):
     """
     Generate a new RSA key pair, saved as files.
 
@@ -155,6 +158,8 @@ def generate_rsa_keys(key_name: str, path=os.path.join(os.path.curdir, 'keys')):
     :return: A tuple of the generated (RSAPrivateKey, RSAPublicKey).
     """
     # Check to see if the path is valid and exists
+    if path == '':
+        path = os.path.join(os.path.curdir, 'keys')
     if not os.path.isdir(path):
         raise NotADirectoryError
     # Generate the RSA key pair. 65537 is the standard public exponent and 3072 is the default key size of ssh-keygen.
@@ -193,8 +198,8 @@ def rsa_encrypt(data: bytes, public_key: rsa.RSAPublicKey) -> bytes:
     # Secure encryption with padding and hashing
     encrypted_data = public_key.encrypt(
         data,
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+        asym_padding.OAEP(
+            mgf=asym_padding.MGF1(algorithm=hashes.SHA256()),
             algorithm=hashes.SHA256(),
             label=None
         )
@@ -209,16 +214,23 @@ def rsa_decrypt(encrypted_data: bytes, private_key: rsa.RSAPrivateKey) -> bytes:
     :param encrypted_data: The bytes to be decrypted.
     :param private_key: An RSAPrivateKey object obtained with generate_rsa_keys() or load_ssh_private_key().
     :return: The decrypted bytes of data.
+    :raises ValueError: If the private key is incorrect or the file was not encrypted with RSA.
     """
     # Identical padding and hashing settings to rsa_encrypt()
-    recovered_data = private_key.decrypt(
-        encrypted_data,
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
+    try:
+        recovered_data = private_key.decrypt(
+            encrypted_data,
+            asym_padding.OAEP(
+                mgf=asym_padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
         )
-    )
+    except ValueError as e:
+        if e.args[0].startswith('Ciphertext'):  # 'Ciphertext length must be equal to key size.'
+            raise ValueError('Bad file.')
+        elif e.args[0].startswith('Encryption'):  # 'Encryption/decryption failed.'
+            raise ValueError('Bad key.')
     return recovered_data
 
 
