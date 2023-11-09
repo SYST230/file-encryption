@@ -3,6 +3,7 @@
 import base64
 import os
 
+from cryptography import exceptions
 from cryptography.hazmat.primitives import hashes
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
@@ -128,12 +129,16 @@ def load_ssh_private_key(key_path: str, password=b''):
     :param key_path: The path to the private key file.
     :param password: The passphrase to the key file, if needed.
     :return: The private key as a private key object of relevant type.
+    :raises ValueError: If the given file is not of the correct format.
     """
     with open(key_path, 'rb') as key_file:
-        private_key = serialization.load_ssh_private_key(
-            key_file.read(),
-            password=None if not password else password
-        )
+        try:
+            private_key = serialization.load_ssh_private_key(
+                key_file.read(),
+                password=None if not password else password
+            )
+        except exceptions.UnsupportedAlgorithm:
+            raise ValueError('The file is of incorrect format.')
     return private_key
 
 
@@ -143,9 +148,13 @@ def load_ssh_public_key(key_path: str):
 
     :param key_path: The path to the public key file.
     :return: The public key as a public key object of relevant type.
+    :raises ValueError: If the given file is not of the correct format.
     """
     with open(key_path, 'rb') as key_file:
-        public_key = serialization.load_ssh_public_key(key_file.read())
+        try:
+            public_key = serialization.load_ssh_public_key(key_file.read())
+        except exceptions.UnsupportedAlgorithm:
+            raise ValueError('The file is of incorrect format.')
     return public_key
 
 
@@ -196,8 +205,21 @@ def rsa_encrypt(data: bytes, public_key: rsa.RSAPublicKey) -> bytes:
     :raises ValueError: If the given private key is not correct.
     """
     # Secure encryption with padding and hashing
-    encrypted_data = public_key.encrypt(
-        data,
+    # Encrypt per 318 bytes of data to allow a common 3072 bit key to work
+    idx = 0
+    encrypted_data = b''
+    while idx+318 < len(data):
+        encrypted_data += public_key.encrypt(
+            data[idx:idx+318],
+            asym_padding.OAEP(
+                mgf=asym_padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+        idx += 318
+    encrypted_data += public_key.encrypt(
+        data[idx:],
         asym_padding.OAEP(
             mgf=asym_padding.MGF1(algorithm=hashes.SHA256()),
             algorithm=hashes.SHA256(),
@@ -217,15 +239,19 @@ def rsa_decrypt(encrypted_data: bytes, private_key: rsa.RSAPrivateKey) -> bytes:
     :raises ValueError: If the private key is incorrect or the file was not encrypted with RSA.
     """
     # Identical padding and hashing settings to rsa_encrypt()
+    idx = 0
+    recovered_data = b''
     try:
-        recovered_data = private_key.decrypt(
-            encrypted_data,
-            asym_padding.OAEP(
-                mgf=asym_padding.MGF1(algorithm=hashes.SHA256()),
-                algorithm=hashes.SHA256(),
-                label=None
+        while idx < len(encrypted_data):
+            recovered_data += private_key.decrypt(
+                encrypted_data[idx:idx+384],
+                asym_padding.OAEP(
+                    mgf=asym_padding.MGF1(algorithm=hashes.SHA256()),
+                    algorithm=hashes.SHA256(),
+                    label=None
+                )
             )
-        )
+            idx += 384
     except ValueError as e:
         if e.args[0].startswith('Ciphertext'):  # 'Ciphertext length must be equal to key size.'
             raise ValueError('Bad file.')
