@@ -1,0 +1,3 @@
+import appgui
+
+appgui.EncryptionApp()
