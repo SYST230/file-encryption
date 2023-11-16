@@ -311,11 +311,19 @@ def aes_encrypt(data: bytes, passwd: bytes):
         p=1,
     )
     key = kdf.derive(passwd)
+    # Encrypt per 16777216 bytes to allow AES to work
+    idx = 0
+    encrypted_data = b''
+    while idx+16777216 < len(data):
+        encryptor = Cipher(algorithms.AES(key), modes.XTS(iv)).encryptor()
+        encrypted_data += encryptor.update(data[idx:idx+16777216]) + encryptor.finalize()
+        idx += 16777216
     encryptor = Cipher(algorithms.AES(key), modes.XTS(iv)).encryptor()
-    if len(data) < 16:
+    last_data = data[idx:]
+    if len(last_data) < 16:
         padder = padding.PKCS7(128).padder()
-        data = padder.update(data) + padder.finalize()
-    encrypted_data = encryptor.update(data) + encryptor.finalize()
+        last_data = padder.update(last_data) + padder.finalize()
+    encrypted_data += encryptor.update(last_data) + encryptor.finalize()
     return encrypted_data, iv
 
 
@@ -336,14 +344,21 @@ def aes_decrypt(encrypted_data: bytes, passwd: bytes, iv: bytes):
         p=1,
     )
     key = kdf.derive(passwd)
+    # Decrypt per 16777216 bytes
+    idx = 0
+    recovered_data = b''
+    while idx+16777216 < len(encrypted_data):
+        decryptor = Cipher(algorithms.AES(key), modes.XTS(iv)).decryptor()
+        recovered_data += decryptor.update(encrypted_data[idx:idx+16777216]) + decryptor.finalize()
+        idx += 16777216
     decryptor = Cipher(algorithms.AES(key), modes.XTS(iv)).decryptor()
-    recovered_padded_data = decryptor.update(encrypted_data) + decryptor.finalize()
+    recovered_padded_data = decryptor.update(encrypted_data[idx:]) + decryptor.finalize()
     try:
         unpadder = padding.PKCS7(128).unpadder()
-        recovered_data = unpadder.update(recovered_padded_data) + unpadder.finalize()
+        recovered_data += unpadder.update(recovered_padded_data) + unpadder.finalize()
     except ValueError as e:
         if str(e) == 'Invalid padding bytes.':
-            recovered_data = recovered_padded_data
+            recovered_data += recovered_padded_data
         else:
             raise e
     return recovered_data
